@@ -3,10 +3,15 @@ import sys
 import signal
 import socket
 import time
+import os
+import pathlib
+import shutil
 
 port_range = range(50001, 50010)
 localhost = "127.0.0.1"
-
+broadcast_print = False
+SEARCH_REFRESH_RATE = 5
+DEBUG_MODE = True
 
 class Node:
 
@@ -17,6 +22,14 @@ class Node:
         self.threads = list()
         self.succ = -1
         self.pred = -1
+        folder_name = "Node{}".format(self.id)
+        dirname = pathlib.Path().absolute()
+        full_fp = os.path.join(dirname, folder_name)
+        print(full_fp)
+        if os.path.exists(full_fp):
+            # os.remove(full_fp)
+            shutil.rmtree(full_fp)
+        os.mkdir(full_fp)
 
         t1 = threading.Thread(target=self.console)
         self.threads.append(t1)
@@ -31,6 +44,18 @@ class Node:
         t3.daemon = True
         self.threads.append(t3)
         t3.start()
+
+        t4 = threading.Thread(target=self.search_for_heartbeat)
+        t4.daemon = True
+        self.threads.append(t4)
+        t4.start()
+    
+    def search_for_heartbeat(self):
+        while True:
+            self.search_broadcast()
+            time.sleep(SEARCH_REFRESH_RATE)
+
+
 
     def console(self):
         while True:
@@ -72,7 +97,7 @@ class Node:
             self.search_broadcast()
             ss.connect((localhost, 50000 + self.succ)) 
         content = "[flood] " + str(target) + " " + msg
-        print("Send \"" + content + "\" to " + str((localhost, 50000 + self.succ)))
+        print("Forward \"" + content + "\" to " + str((localhost, 50000 + self.succ)))
         ss.send(content.encode())
         ss.close()
         time.sleep(4)
@@ -95,7 +120,6 @@ class Node:
             print("[U] Received \"" + msg + "\" from " + str(addr))
             reply = "[Response] " + str(self.id)
             ss.sendto(reply.encode(), addr)
-
 
     # def direct_message(self, target):
 
@@ -132,17 +156,19 @@ class Node:
                 continue
             ss = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             content = "[search] " + str(self.id)
-            print("Send \"" + content + "\" to " +
-                  str((localhost, i - 50000)), end=": ")
+            if broadcast_print:
+                print("Send \"" + content + "\" to " + str((localhost, i - 50000)), end=": ")
             ss.sendto(content.encode(), (localhost, i))
             try:
                 msg, addr = ss.recvfrom(1024)
                 msg = msg.decode().split()
-                if(msg[0] == "[Response]"):
-                    print("Got response from " + str(addr))
+                if msg[0] == "[Response]":
+                    if broadcast_print:
+                        print("Got response from " + str(addr))
                     alive.append(int(msg[1]))
             except ConnectionResetError:
-                print("No reponse")
+                if broadcast_print:
+                    print("No reponse")
                 continue
             except KeyboardInterrupt:
                 print("Ctrl-C")
@@ -150,8 +176,8 @@ class Node:
             ss.close()
         temp_len = len(alive)
         if(temp_len == 0):
-            self.pred = self.addr
-            self.succ = self.addr
+            self.pred = self.id
+            self.succ = self.id
         elif(temp_len == 1):
             self.pred = alive[0]
             self.succ = alive[0]
@@ -171,8 +197,9 @@ class Node:
                 self.succ = alive[0]
             if not pred_found:
                 self.pred = alive[-1]
-        print("My predecessor node: {}".format(self.pred))
-        print("My successor node  : {}".format(self.succ))
+        if DEBUG_MODE:
+            print("My predecessor node: {}".format(self.pred))
+            print("My successor node  : {}".format(self.succ))
 
 
 if __name__ == "__main__":
